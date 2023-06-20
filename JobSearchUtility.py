@@ -2,6 +2,7 @@ import imaplib
 import email
 from email.header import decode_header
 import json
+import spacy
 import openai
 import re
 import requests
@@ -17,8 +18,8 @@ if __name__ == '__main__':
     imap_server = imaplib.IMAP5('outlook.office365.com')
     username = "aUsername"
     password = "aPassword"
-    imap_server.login(username, password)
     mailbox = "Inbox"
+    imap_server.login(username, password)
     #I can choose to get unseen or get mail from a certain email address or before a certain date
     #Get all messages in the email server
     #Returns message ids
@@ -103,7 +104,7 @@ if __name__ == '__main__':
                 except json.JSONDecodeError:
                     logger.debug("Invalid json from: " + subject)
 
-                gptRequest = "Here is a job application " + jobDescriptionString + "\n Use it to fill the following form: \n"
+                gptRequest = "Here is a job application " + jobDescriptionString + "\n Use it to fill the following form, seperate different items by with a new line: \n"
                 + "Salary: <Enter salary here>\n"
                 + "Requirements: <Enter requirements here>\n"
                 + "Certifications: <Enter certifications needed here>\n"
@@ -117,8 +118,25 @@ if __name__ == '__main__':
                 aiResponse = openai.Completion.create(
                     engine='text-davinci-003', #What engine should i choose?
                     prompt=jobDescriptionString,
-                    max_tokens=100
+                    max_tokens=gptRequest.__sizeof__
                 )
+                stringToLookFor = ["Salary:", "Requirements:", "Certifications:", "Time:", "Company;", "Location:"]                
+                categoryLocations = {} 
+                
+                for category in stringToLookFor:
+                    categoryLocations[category] = aiResponse["text"].find(category)
+                
+                categoryOrder = []  
+                sortedCategoryPairs = sorted(categoryLocations.items(), key = lambda x: x[1])#Is going to be an array where the first element is the first category that's given in the response of the ai
+                
+                categoryStrings = {} 
+                
+                for i, categoryPair in enumerate(sortedCategoryPairs):
+
+                    if i < len(sortedCategoryPairs) - 1:
+                        categoryStrings[categoryPair[0]] = aiResponse[categoryPair[1]:sortedCategoryPairs[i + 1]]
+                    else:
+                        categoryStrings[categoryPair[0]] = aiResponse[categoryPair[1]:]
             else:
                 logger.warning("Failed to get message")
     else:
