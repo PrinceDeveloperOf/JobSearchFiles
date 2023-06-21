@@ -1,6 +1,6 @@
-import imaplib
 import email
 from email.header import decode_header
+from datetime import datetime
 import json
 import spacy
 import openai
@@ -8,6 +8,9 @@ import re
 import requests
 import logging
 import sys
+import csv
+import imaplib
+
 
 if __name__ == '__main__':
     #Setup Logging
@@ -20,17 +23,28 @@ if __name__ == '__main__':
     password = "aPassword"
     mailbox = "Inbox"
     imap_server.login(username, password)
+    
     #I can choose to get unseen or get mail from a certain email address or before a certain date
     #Get all messages in the email server
     #Returns message ids
     status, data = imap_server.search(None, 'ALL')
-    
+
     if status == 'OK':
         message_ids = data[0].split()
         #Check each message
+        stringToLookFor = ["Salary:", "Requirements:", "Certifications:", "Time:", "Company;", "Location:"]                
+        categoriesForData = stringToLookFor  
+        categoriesForData.append("subject")
+        categoriesForData.append("message")
+
+        csvData = [categoriesForData]
+        newData = [None] * len(categoriesForData)
+        
+        
         for message_id in message_ids:
+            #if the message already exits then continue
             #Get the whole message
-            status, message_data = imap_server.fetch(message_id,'(RFC822)' )
+            status, messageData = imap_server.fetch(message_id,'(RFC822)' )
         
             if status == 'OK':
                 #Checking the validity of the message
@@ -49,7 +63,7 @@ if __name__ == '__main__':
                         logging.debug("An RFC822 message has returned not as a tuple")
 
                 #The email message should be in html format
-                email_message = message_data[0][1]
+                email_message = messageData[0][1]
                 #Find the job that was applied for 
                 jobIndex = email_message.find("View Job")
 
@@ -98,7 +112,7 @@ if __name__ == '__main__':
                 #If using GPT i should make the prompt to the ai a question
             
 
-                #TODO check if valid JSON
+                #Checks if it's JSON
                 try:
                     jsonObject = json.loads(jobDescriptionString)
                 except json.JSONDecodeError:
@@ -118,14 +132,16 @@ if __name__ == '__main__':
                 aiResponse = openai.Completion.create(
                     engine='text-davinci-003', #What engine should i choose?
                     prompt=jobDescriptionString,
-                    max_tokens=gptRequest.__sizeof__
+                    max_tokens=len(gptRequest)
                 )
-                stringToLookFor = ["Salary:", "Requirements:", "Certifications:", "Time:", "Company;", "Location:"]                
+
                 categoryLocations = {} 
                 
                 for category in stringToLookFor:
                     categoryLocations[category] = aiResponse["text"].find(category)
-                
+                    if categoryLocations[category] == -1:
+                        logger.warning("Category: " + category + " was not found in message: " + subject)    
+                        del(categoryLocations[category])
                 categoryOrder = []  
                 sortedCategoryPairs = sorted(categoryLocations.items(), key = lambda x: x[1])#Is going to be an array where the first element is the first category that's given in the response of the ai
                 
@@ -134,11 +150,40 @@ if __name__ == '__main__':
                 for i, categoryPair in enumerate(sortedCategoryPairs):
 
                     if i < len(sortedCategoryPairs) - 1:
-                        categoryStrings[categoryPair[0]] = aiResponse[categoryPair[1]:sortedCategoryPairs[i + 1]]
+                        categoryStrings[categoryPair[0]] = aiResponse[categoryPair[1]:sortedCategoryPairs[i + 1][1]]
                     else:
                         categoryStrings[categoryPair[0]] = aiResponse[categoryPair[1]:]
+                    
+                newData[0] = categoryStrings[categoriesForData[0]]
+                newData[1] = categoryStrings[categoriesForData[1]]
+                newData[2] = categoryStrings[categoriesForData[2]]
+                newData[3] = categoryStrings[categoriesForData[3]]
+                newData[4] = categoryStrings[categoriesForData[4]]
+                newData[5] = categoryStrings[categoriesForData[5]]
+                newData[6] = subject
+                newData[7] = jobDescriptionString
+                    
+
+                csvData.append(newData)
+                    
+                #Process the entries for the categoryStrings
+                
+                #processedCategories = {}
+                #for categoryString in categoryStrings:
+                #    stringToParse = categoryString[1]
+                #    processedCategories[categoryString[0]] = stringToParse.split()
+                          
+                
+                     
             else:
                 logger.warning("Failed to get message")
+        
+        with open("csvData" + datetime.now(), mode='w', newline='') as file:
+            writer = csv.writer(file)
+            
+            for row in csvData:
+                writer.writerow(row)
+                
     else:
         logger.critical("Bad Email Credentials")
 
